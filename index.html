@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SofaScanner Pro - Live Odds</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0b132b; color: #ffffff; margin: 0; padding: 16px; }
+        .card { background: #1c2541; border-radius: 12px; padding: 16px; margin-bottom: 12px; border: 1px solid #3a506b; }
+        .badge { background: #00b4d8; color: #000; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 12px; }
+        .btn { width: 100%; background: #48cae4; color: #000; border: none; padding: 14px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; margin-bottom: 12px; }
+        .status { font-size: 13px; color: #90e0ef; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+
+    <h2>⚽ SofaScanner - %90+ Alt Sinyal</h2>
+    <div class="status" id="statusBox">Sistem hazır. Taramayı başlatın.</div>
+
+    <button class="btn" onclick="bildirimIzniAl()">1. BİLDİRİMLERİ AKTİF ET</button>
+    <button class="btn" style="background:#5bc0be;" onclick="canliSofascoreTara()">2. SOFASCORE CANLI TARAMA YAP</button>
+
+    <div id="results"></div>
+
+<script>
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js');
+}
+
+function bildirimIzniAl() {
+    Notification.requestPermission().then(perm => {
+        if(perm === 'granted') alert("Bildirim izni onaylandı!");
+        else alert("Bildirim izni verilmedi.");
+    });
+}
+
+function factorial(n) {
+    if (n <= 1) return 1;
+    let res = 1;
+    for (let i = 2; i <= n; i++) res *= i;
+    return res;
+}
+
+function poissonPMF(k, lambda) {
+    return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k);
+}
+
+function hesaplaAltOlasilik(expectedXG, baraj) {
+    let intBaraj = Math.floor(baraj);
+    let cumulative = 0;
+    for (let k = 0; k <= intBaraj; k++) {
+        cumulative += poissonPMF(k, expectedXG);
+    }
+    return cumulative;
+}
+
+async function canliSofascoreTara() {
+    const statusBox = document.getElementById('statusBox');
+    const resultsDiv = document.getElementById('results');
+    statusBox.innerText = "Sofascore canlı verileri çekiliyor...";
+    resultsDiv.innerHTML = "";
+
+    // Sofascore kamuya açık canlı maçlar endpoint'i (CORS Proxy üzerinden)
+    const proxyUrl = "https://api.allorigins.win/raw?url=";
+    const targetUrl = encodeURIComponent("https://api.sofascore.com/api/v1/sport/football/events/live");
+
+    try {
+        const response = await fetch(proxyUrl + targetUrl);
+        const data = await response.json();
+        const events = data.events || [];
+
+        statusBox.innerText = `Toplam ${events.length} canlı maç analiz ediliyor...`;
+
+        for (let ev of events) {
+            const homeGoals = ev.homeScore.current || 0;
+            const awayGoals = ev.awayScore.current || 0;
+            const currentTotalGoals = homeGoals + awayGoals;
+            
+            // Maçın oynanan dakikası
+            let elapsed = 45;
+            if (ev.time && ev.time.played) elapsed = ev.time.played;
+
+            // Kalan süreye göre dinamik xG hesabı
+            const remainingRatio = Math.max((90 - elapsed) / 90, 0.05);
+            
+            // Tahmini toplam xG (Mevcut goller + Kalan süre xG beklentisi)
+            const projectedXG = currentTotalGoals + (2.10 * remainingRatio);
+
+            // Baraj Analizi (Örn: Mevcut golün 2.5 fazlası - 2 gol varsa 4.5 Alt gibi)
+            const targetLine = currentTotalGoals + 2.5; 
+            const probability = hesaplaAltOlasilik(projectedXG, targetLine);
+            const winPct = (probability * 100).toFixed(1);
+
+            // %90 ve üstü Kesinlik Filtresi
+            if (probability >= 0.90) {
+                const title = `${ev.homeTeam.shortName} vs ${ev.awayTeam.shortName}`;
+                const detail = `Dakika: ${elapsed}' | Skor: ${currentTotalGoals} | Projeksiyon xG: ${projectedXG.toFixed(2)}`;
+                
+                resultsDiv.innerHTML += `
+                    <div class="card">
+                        <span class="badge">%${winPct} GÜVEN</span>
+                        <h3>${title}</h3>
+                        <p>${detail}</p>
+                        <strong>Tavsiye: ${targetLine} ALT</strong>
+                    </div>
+                `;
+
+                // Telefona Push Bildirim Gönder
+                if (Notification.permission === 'granted') {
+                    navigator.serviceWorker.ready.then(reg => {
+                        reg.showNotification("Sinyal Yakalandı! ⚽", {
+                            body: `${title} - %${winPct} ihtimalle ${targetLine} ALT!`,
+                            icon: 'https://cdn-icons-png.flaticon.com/512/53/53283.png'
+                        });
+                    });
+                }
+            }
+        }
+
+        if(resultsDiv.innerHTML === "") {
+            resultsDiv.innerHTML = "<p>Şu anda %90 eşiğini aşan canlı maç kriteri bulunamadı.</p>";
+        }
+
+    } catch (err) {
+        statusBox.innerText = "Veri çekilirken bağlantı hatası oluştu.";
+    }
+}
+</script>
+</body>
+</html>
