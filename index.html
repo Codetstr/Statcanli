@@ -10,7 +10,7 @@
         .card { background: #1c2541; border-radius: 12px; padding: 16px; margin-bottom: 12px; border: 1px solid #3a506b; }
         .badge { background: #00b4d8; color: #000; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 12px; }
         .btn { width: 100%; background: #48cae4; color: #000; border: none; padding: 14px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; margin-bottom: 12px; }
-        .status { font-size: 13px; color: #90e0ef; margin-bottom: 15px; }
+        .status { font-size: 13px; color: #90e0ef; margin-bottom: 15px; word-break: break-all; }
     </style>
 </head>
 <body>
@@ -61,38 +61,40 @@ async function canliSofascoreTara() {
     statusBox.innerText = "Sofascore canlı verileri çekiliyor...";
     resultsDiv.innerHTML = "";
 
-    // Sofascore kamuya açık canlı maçlar endpoint'i (CORS Proxy üzerinden)
-    const proxyUrl = "https://api.allorigins.win/raw?url=";
-    const targetUrl = encodeURIComponent("https://api.sofascore.com/api/v1/sport/football/events/live");
+    const targetApi = "https://api.sofascore.com/api/v1/sport/football/events/live";
+    const proxyUrl = "https://corsproxy.io/?" + encodeURIComponent(targetApi);
 
     try {
-        const response = await fetch(proxyUrl + targetUrl);
+        const response = await fetch(proxyUrl, {
+            headers: {
+                'Accept': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP Hata koda sahip: ${response.status}`);
+        }
+
         const data = await response.json();
         const events = data.events || [];
 
         statusBox.innerText = `Toplam ${events.length} canlı maç analiz ediliyor...`;
 
         for (let ev of events) {
-            const homeGoals = ev.homeScore.current || 0;
-            const awayGoals = ev.awayScore.current || 0;
+            const homeGoals = ev.homeScore?.current || 0;
+            const awayGoals = ev.awayScore?.current || 0;
             const currentTotalGoals = homeGoals + awayGoals;
             
-            // Maçın oynanan dakikası
             let elapsed = 45;
             if (ev.time && ev.time.played) elapsed = ev.time.played;
 
-            // Kalan süreye göre dinamik xG hesabı
             const remainingRatio = Math.max((90 - elapsed) / 90, 0.05);
-            
-            // Tahmini toplam xG (Mevcut goller + Kalan süre xG beklentisi)
             const projectedXG = currentTotalGoals + (2.10 * remainingRatio);
 
-            // Baraj Analizi (Örn: Mevcut golün 2.5 fazlası - 2 gol varsa 4.5 Alt gibi)
             const targetLine = currentTotalGoals + 2.5; 
             const probability = hesaplaAltOlasilik(projectedXG, targetLine);
             const winPct = (probability * 100).toFixed(1);
 
-            // %90 ve üstü Kesinlik Filtresi
             if (probability >= 0.90) {
                 const title = `${ev.homeTeam.shortName} vs ${ev.awayTeam.shortName}`;
                 const detail = `Dakika: ${elapsed}' | Skor: ${currentTotalGoals} | Projeksiyon xG: ${projectedXG.toFixed(2)}`;
@@ -106,7 +108,6 @@ async function canliSofascoreTara() {
                     </div>
                 `;
 
-                // Telefona Push Bildirim Gönder
                 if (Notification.permission === 'granted') {
                     navigator.serviceWorker.ready.then(reg => {
                         reg.showNotification("Sinyal Yakalandı! ⚽", {
@@ -123,7 +124,8 @@ async function canliSofascoreTara() {
         }
 
     } catch (err) {
-        statusBox.innerText = "Veri çekilirken bağlantı hatası oluştu.";
+        console.error(err);
+        statusBox.innerText = "Veri çekilirken bağlantı hatası oluştu: " + err.message;
     }
 }
 </script>
